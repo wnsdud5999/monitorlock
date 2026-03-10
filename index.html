@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stay Awake Player</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #000;
+        color: #e5e7eb;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+      }
+      .panel {
+        width: min(520px, 92vw);
+        padding: 20px;
+        border: 1px solid #222;
+        border-radius: 14px;
+        background: #090909;
+      }
+      h1 { font-size: 1.1rem; margin: 0 0 10px; }
+      p { margin: 0 0 14px; line-height: 1.45; color: #cbd5e1; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: .95rem;
+        cursor: pointer;
+      }
+      #startBtn { background: #22c55e; color: #04130a; }
+      #stopBtn { background: #ef4444; color: #1a0707; }
+      #status {
+        margin-top: 12px;
+        padding: 10px;
+        border-radius: 10px;
+        background: #111827;
+        color: #bfdbfe;
+        font-size: .92rem;
+      }
+      video {
+        width: 1px;
+        height: 1px;
+        position: fixed;
+        inset: -100px;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .hint { margin-top: 10px; color: #94a3b8; font-size: .85rem; }
+    </style>
+  </head>
+  <body>
+    <main class="panel">
+      <h1>잠금 방지용 무음 비디오</h1>
+      <p>
+        시작을 누르면 검은 프레임의 무음 비디오를 계속 재생하고(백그라운드 1×1),
+        가능하면 Screen Wake Lock도 같이 요청합니다.
+      </p>
+      <div class="row">
+        <button id="startBtn">시작</button>
+        <button id="stopBtn">중지</button>
+      </div>
+      <div id="status">대기 중</div>
+      <div class="hint">팁: 브라우저 탭이 완전히 정지되면 동작이 끊길 수 있어요.</div>
+    </main>
+
+    <video id="keepAliveVideo" autoplay muted playsinline loop></video>
+
+    <script>
+      const statusEl = document.getElementById('status');
+      const video = document.getElementById('keepAliveVideo');
+      let wakeLock = null;
+      let stream = null;
+      let paintTimer = null;
+
+      const setStatus = (msg) => statusEl.textContent = msg;
+
+      async function requestWakeLock() {
+        if (!('wakeLock' in navigator)) {
+          return 'Wake Lock API 미지원';
+        }
+        try {
+          wakeLock = await navigator.wakeLock.request('screen');
+          wakeLock.addEventListener('release', () => {
+            setStatus('Wake Lock 해제됨 (비디오는 계속 재생 중)');
+          });
+          return 'Wake Lock 활성화';
+        } catch (err) {
+          return `Wake Lock 실패: ${err.message}`;
+        }
+      }
+
+      function startBlackVideoLoop() {
+        if (stream) return;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 16;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d', { alpha: false });
+
+        const drawBlackFrame = () => {
+          ctx.fillStyle = '#000000';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        };
+
+        drawBlackFrame();
+        paintTimer = setInterval(drawBlackFrame, 1000);
+
+        stream = canvas.captureStream(1);
+        video.srcObject = stream;
+        video.play().catch((err) => {
+          setStatus(`비디오 재생 실패: ${err.message}`);
+        });
+      }
+
+      function stopBlackVideoLoop() {
+        if (paintTimer) {
+          clearInterval(paintTimer);
+          paintTimer = null;
+        }
+        if (stream) {
+          stream.getTracks().forEach(track => track.stop());
+          stream = null;
+        }
+        video.srcObject = null;
+      }
+
+      async function start() {
+        startBlackVideoLoop();
+        const wakeLockMsg = await requestWakeLock();
+        setStatus(`실행 중 — 무음 비디오 루프 활성화 / ${wakeLockMsg}`);
+      }
+
+      async function stop() {
+        if (wakeLock) {
+          await wakeLock.release();
+          wakeLock = null;
+        }
+        stopBlackVideoLoop();
+        setStatus('중지됨');
+      }
+
+      document.getElementById('startBtn').addEventListener('click', start);
+      document.getElementById('stopBtn').addEventListener('click', stop);
+
+      document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible' && wakeLock == null && stream) {
+          const msg = await requestWakeLock();
+          setStatus(`실행 중 — 무음 비디오 루프 활성화 / ${msg}`);
+        }
+      });
+    </script>
+  </body>
+</html>
